@@ -9,7 +9,7 @@ shopt -s expand_aliases
 alias process_template="perl -p -e 's/\\$\{([^}]+)\}/defined \$ENV{\$1} ? \$ENV{\$1} : \$&/eg'"
 
 echo "-----> Deploying nginx..."
-APP="$1"; PORT="$2"
+APP="$1"; PORT="$2"; IMAGE="dokku/${APP}"
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )" #this directory
 APP_PATH="$DOKKU_ROOT/$APP"
 VHOST_PATH="$APP_PATH/VHOST"
@@ -18,6 +18,19 @@ APP_SSL_PATH="$APP_PATH/tls"
 
 # use app VHOST if it exists. otherwise use dokku's vhost
 [[ -e $APP_PATH/VHOST ]] && VHOST_PATH="$APP_PATH/VHOST" || VHOST_PATH="$DOKKU_ROOT/VHOST"
+
+# copy templates to TMP_PATH if they exist. then override if in container
+TMP_PATH=$(mktemp -d /tmp/dokku_nginx_alt.XXXXX)
+[[ -f $APP_PATH/nginx.once.tpl ]] && cp $APP_PATH/nginx.once.tpl $TMP_PATH
+[[ -f $APP_PATH/nginx.ssl.tpl ]] && cp $APP_PATH/nginx.ssl.tpl $TMP_PATH
+[[ -f $APP_PATH/nginx.tpl ]] && cp $APP_PATH/nginx.tpl $TMP_PATH
+
+# attempt to copy template(s) from container and continue gracefully if not found
+ID=$(docker run -d $IMAGE /bin/sh)
+docker cp $ID:/app/.dokku/nginx.once.tpl $TMP_PATH 2> /dev/null || true
+docker cp $ID:/app/.dokku/nginx.ssl.tpl $TMP_PATH 2> /dev/null || true
+docker cp $ID:/app/.dokku/nginx.tpl $TMP_PATH 2> /dev/null || true
+docker rm -f $ID
 
 # Get list of VHOST domains. This will be overridden below if SSL for some
 # domains are enabled. If VHOST does not exist, set to empty string.
@@ -33,12 +46,12 @@ rm -f $APP_PATH/nginx.conf #need -f to supress error if non-existent file
 # Add once-off configuration options.
 echo '-----> Configuring once-off options...'
 NGINX_ONCE_CONF="$DIR/nginx.once.conf"
-APP_NGINX_ONCE_TEMPLATE="$APP_PATH/nginx.once.tpl"
+APP_NGINX_ONCE_TEMPLATE="$TMP_PATH/nginx.once.tpl"
 if [[ -e $APP_NGINX_ONCE_TEMPLATE ]]; then
   echo '-----> Overriding default nginx.once.conf with detected nginx.once.tpl'
   NGINX_ONCE_CONF=$APP_NGINX_ONCE_TEMPLATE
 fi
-cat $NGINX_ONCE_CONF | process_template >> $APP_PATH/nginx.conf
+cat $NGINX_ONCE_CONF | process_template >> $TMP_PATH/nginx.conf
 
 # Check if SSL should be enabled. If there are $DOKKU_ROOT/tls certificates,
 # try to use those. If the app has an tls/ directory, these override the root
@@ -54,7 +67,7 @@ if [[ -e "$SSL_PATH/server.crt" ]] && [[ -e "$SSL_PATH/server.key" ]]; then
   # Ability to override default configuration files
   # (If a nginx.ssl.tpl file exists in the $APP_PATH directory, use that
   # instead.)
-  APP_NGINX_SSL_TEMPLATE="$APP_PATH/nginx.ssl.tpl"
+  APP_NGINX_SSL_TEMPLATE="$TMP_PATH/nginx.ssl.tpl"
   if [[ -e $APP_NGINX_SSL_TEMPLATE ]]; then
     echo '-----> Overriding default SSL nginx.conf with detected nginx.ssl.tpl'
     NGINX_CONF=$APP_NGINX_SSL_TEMPLATE
@@ -84,7 +97,7 @@ if [[ -e "$SSL_PATH/server.crt" ]] && [[ -e "$SSL_PATH/server.key" ]]; then
     if [[ -z $line ]]; then continue; fi #ignore blank lines
     echo "-----> Configuring SSL for $line..."
     SERVER_NAME=$line
-    cat $NGINX_CONF | process_template >> $APP_PATH/nginx.conf
+    cat $NGINX_CONF | process_template >> $TMP_PATH/nginx.conf
 
     # CRUDE HACK: Since the `URL` file only expects one app url, we keep
     # overwriting the `URL` file with the last processed domain. The URL
@@ -99,7 +112,7 @@ NGINX_CONF="$DIR/nginx.conf" # default non-SSL conf file
 
 # Ability to override default configuration files
 # (If a nginx.tpl file exists in the $APP_PATH directory, use that instead.)
-APP_NGINX_TEMPLATE="$APP_PATH/nginx.tpl"
+APP_NGINX_TEMPLATE="$TMP_PATH/nginx.tpl"
 if [[ -e $APP_NGINX_TEMPLATE ]]; then
   echo '-----> Overriding default nginx.conf with detected nginx.tpl'
   NGINX_CONF=$APP_NGINX_TEMPLATE
@@ -115,7 +128,7 @@ if [[ ! -z "$NONSSL_VHOSTS" ]]; then
   # Then trim leading and trailing whitespace (xargs). If VHOST file is blank,
   # xargs reduces any whitespace to a blank string.
   SERVER_NAME=`echo $NONSSL_VHOSTS | tr '\n' ' ' | xargs`
-  cat $NGINX_CONF | process_template >> $APP_PATH/nginx.conf
+  cat $NGINX_CONF | process_template >> $TMP_PATH/nginx.conf
 fi
 
 # CRUDE HACK: Since the `URL` file only expects one app url, we take the
@@ -127,4 +140,5 @@ pluginhook nginx-pre-reload $APP $PORT
 echo '-----> Reloading nginx...'
 sudo /etc/init.d/nginx reload > /dev/null
 
+rm -rf $TMP_PATH # cleanup
 cat #prints output from any plugins chained to this
