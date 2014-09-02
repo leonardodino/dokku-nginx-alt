@@ -51,7 +51,7 @@ if [[ -e $APP_NGINX_ONCE_TEMPLATE ]]; then
   echo '-----> Overriding default nginx.once.conf with detected nginx.once.tpl'
   NGINX_ONCE_CONF=$APP_NGINX_ONCE_TEMPLATE
 fi
-cat $NGINX_ONCE_CONF | process_template >> $TMP_PATH/nginx.conf
+cat $NGINX_ONCE_CONF | process_template >> $APP_PATH/nginx.conf
 
 # Check if SSL should be enabled. If there are $DOKKU_ROOT/tls certificates,
 # try to use those. If the app has an tls/ directory, these override the root
@@ -97,7 +97,7 @@ if [[ -e "$SSL_PATH/server.crt" ]] && [[ -e "$SSL_PATH/server.key" ]]; then
     if [[ -z $line ]]; then continue; fi #ignore blank lines
     echo "-----> Configuring SSL for $line..."
     SERVER_NAME=$line
-    cat $NGINX_CONF | process_template >> $TMP_PATH/nginx.conf
+    cat $NGINX_CONF | process_template >> $APP_PATH/nginx.conf
 
     # CRUDE HACK: Since the `URL` file only expects one app url, we keep
     # overwriting the `URL` file with the last processed domain. The URL
@@ -128,7 +128,7 @@ if [[ ! -z "$NONSSL_VHOSTS" ]]; then
   # Then trim leading and trailing whitespace (xargs). If VHOST file is blank,
   # xargs reduces any whitespace to a blank string.
   SERVER_NAME=`echo $NONSSL_VHOSTS | tr '\n' ' ' | xargs`
-  cat $NGINX_CONF | process_template >> $TMP_PATH/nginx.conf
+  cat $NGINX_CONF | process_template >> $APP_PATH/nginx.conf
 fi
 
 # CRUDE HACK: Since the `URL` file only expects one app url, we take the
