@@ -21,7 +21,18 @@ APP_SSL_PATH="$APP_PATH/tls"
 
 # Get list of VHOST domains. This will be overridden below if SSL for some
 # domains are enabled. If VHOST does not exist, set to empty string.
+# Experimental
 NONSSL_VHOSTS=`cat $VHOST_PATH 2>&- || echo ''`
+if [ "$NONSSL_VHOSTS" = "" ]; then
+  VHOST=$(< "$DOKKU_ROOT/VHOST")
+  SUBDOMAIN=${APP/%\.${VHOST}/}
+  if [[ "$APP" == *.* ]] && [[ "$SUBDOMAIN" == "$APP" ]]; then
+    NONSSL_VHOSTS="${APP/\//-}"
+  else
+    NONSSL_VHOSTS="${APP/\//-}.$VHOST"
+  fi
+fi
+
 
 # Load app config variables such that the template can access them like:
 # ${MY_VAR}.
